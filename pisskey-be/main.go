@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
@@ -51,13 +52,20 @@ type Server struct {
 func NewServer() *Server {
 	wconfig := &webauthn.Config{
 		RPDisplayName: "Passkey Demo",
-		RPID:          "343ac7ec2fc7.ngrok-free.app",
+		RPID:          "37c8a855a418.ngrok-free.app",
 		RPOrigins:     []string{
 			"http://localhost:3000", 
 			"http://192.168.29.216:3000", 
 			"http://192.168.29.136:3000", 
 			"https://localhost:3000",
-			"https://343ac7ec2fc7.ngrok-free.app",
+			"https://37c8a855a418.ngrok-free.app",
+		},
+		Timeouts: webauthn.TimeoutsConfig{
+			// Login: webauthn.TimeoutConfig{},
+			Login: webauthn.TimeoutConfig{
+				Enforce: true,  // Enable server-side timeout
+				Timeout: 5 * time.Second,  // Optional: override default
+			},
 		},
 	}
 
@@ -152,7 +160,7 @@ func (s *Server) BeginRegistration(c echo.Context) error {
 	s.mu.Unlock()
 
 	// Debug: print the options structure
-	fmt.Printf("BeginRegistration options: %+v\n", options)
+	fmt.Printf("BeginRegistration options: %+v\n, session: %s\n", options, session.Expires.String())
 
 	response := map[string]interface{}{
 		"options":   options,
@@ -186,7 +194,7 @@ func (s *Server) FinishRegistration(c echo.Context) error {
 
 	s.mu.Lock()
 	user.Credentials = append(user.Credentials, *credential)
-	delete(s.sessions, sessionID)
+	// delete(s.sessions, sessionID)
 	fmt.Printf("✅ Successfully registered user '%s' with %d credentials\n", username, len(user.Credentials))
 	s.mu.Unlock()
 
@@ -246,7 +254,10 @@ func (s *Server) BeginDiscoverableLogin(c echo.Context) error {
 	
 	// For discoverable credentials, we don't specify a user
 	// The webauthn library will create options without allowCredentials
-	options, session, err := s.webAuthn.BeginDiscoverableLogin()
+	options, session, err := s.webAuthn.BeginDiscoverableLogin(
+		// Configure signature validity to be atleast 30 minutes
+
+	)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
@@ -258,6 +269,7 @@ func (s *Server) BeginDiscoverableLogin(c echo.Context) error {
 	s.mu.Lock()
 	s.sessions[sessionID] = session
 	s.mu.Unlock()
+	fmt.Printf("BeginDiscoverableLogin options: %+v\n, session: %s\n", options, session.Expires.String())
 
 	response := map[string]interface{}{
 		"options":   options,
@@ -278,7 +290,9 @@ func (s *Server) FinishLogin(c echo.Context) error {
 	s.mu.RLock()
 	session, exists := s.sessions[sessionID]
 	s.mu.RUnlock()
-
+	if !session.Expires.IsZero() && session.Expires.Before(time.Now()) {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Session has Expired"})
+	}
 	if !exists {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "Invalid session"})
 	}
@@ -299,7 +313,7 @@ func (s *Server) FinishLogin(c echo.Context) error {
 		}
 
 		s.mu.Lock()
-		delete(s.sessions, sessionID)
+		// delete(s.sessions, sessionID)
 		s.mu.Unlock()
 
 		return c.JSON(http.StatusOK, map[string]string{"status": "success", "username": username})
@@ -337,7 +351,7 @@ func (s *Server) FinishLogin(c echo.Context) error {
 		}
 
 		s.mu.Lock()
-		delete(s.sessions, sessionID)
+		// delete(s.sessions, sessionID)
 		s.mu.Unlock()
 
 		// Update the credential in the user's record
@@ -376,8 +390,10 @@ func main() {
 	// Routes
 	e.GET("/register/begin", server.BeginRegistration)
 	e.POST("/register/finish", server.FinishRegistration)
+
 	e.GET("/login/begin", server.BeginLogin)
 	e.POST("/login/finish", server.FinishLogin)
+	
 	e.GET("/login/discoverable/begin", server.BeginDiscoverableLogin)
 	e.POST("/login/discoverable/finish", server.FinishLogin)
 

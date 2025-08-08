@@ -377,6 +377,28 @@ export default function Home() {
       if (!finishResponse.ok) {
         throw new Error(finishData.error || 'Failed to finish discoverable login');
       }
+      
+      console.log('Finish discoverable login response:', finishData);
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      console.log('Redo the same request again');
+      
+      // Finish discoverable login (no username needed)
+      const finishResponse2 = await fetch(`${serverUrl}/login/discoverable/finish?sessionId=${beginData.sessionId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(credentialForServer),
+      });
+
+      const finishData2 = await finishResponse2.json();
+
+      if (!finishResponse2.ok) {
+        throw new Error(finishData.error || 'Failed to finish discoverable login');
+      }
+
+      console.log('Finish discoverable login response:', finishData2);
+
 
       const authenticatedUsername = finishData.username || 'Unknown User';
       setStatus(`✅ Welcome back, ${authenticatedUsername}! Authentication successful!`);
